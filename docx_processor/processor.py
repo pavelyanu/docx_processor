@@ -414,17 +414,36 @@ def parse_transaction_description(
 
         # Try to find ID and split fields accordingly
         id_found = False
-        for i, word in enumerate(text):
-            if config.id_test_func(word):
-                result[0] = " ".join(text[:i]).strip()  # Counterparty
-                result[1] = word  # ID
-                result[2] = " ".join(text[i + 1 :]).strip()  # Description
+        counterparty_name = ""
+        counterparty_id = ""
+        description = ""
+        i = 0
+
+        while i < len(text):
+            if config.id_test_func(text[i]):
                 id_found = True
                 break
+            else:
+                counterparty_name += text[i] + " "
+                i += 1
+        counterparty_name = counterparty_name.strip()
 
-        # If no ID found, put everything in the first field
-        if not id_found and text:
-            result[0] = " ".join(text).strip()
+        if not id_found:
+            raise TableProcessingError("ID not found in transaction description")
+
+        while i < len(text) and config.id_test_func(text[i]):
+            counterparty_id += text[i]
+            i += 1
+        counterparty_id = counterparty_id.strip()
+
+        while i < len(text):
+            description += text[i] + " "
+            i += 1
+        description = description.strip()
+
+        result[0] = counterparty_name
+        result[1] = counterparty_id
+        result[2] = description
 
         return result
     except Exception as e:
@@ -559,6 +578,36 @@ def export_to_excel(table: Table, output_document_format: OutputDocumentFormat) 
         raise ExportError(f"Failed to export to Excel: {str(e)}")
 
 
+def export_to_csv(table: Table, output_document_format: OutputDocumentFormat) -> None:
+    """
+    Export table to CSV file.
+
+    Args:
+        table: Table to export
+        output_document_format: Output format configuration
+
+    Raises:
+        ExportError: If export fails
+    """
+    try:
+        if not table:
+            raise ExportError("Cannot export empty table")
+
+        # Check if we have the right number of columns
+        if table and len(table[0]) != len(output_document_format.columns):
+            raise ExportError(
+                f"Table has {len(table[0])} columns but {len(output_document_format.columns)} "
+                f"column names were provided"
+            )
+
+        df = pd.DataFrame(table, columns=output_document_format.columns)
+        df.to_csv(output_document_format.path, index=False)  # type: ignore
+    except ExportError:
+        raise
+    except Exception as e:
+        raise ExportError(f"Failed to export to CSV: {str(e)}")
+
+
 def replace_whitespace(text: Cell) -> Cell:
     """Replace whitespace in text."""
     if not isinstance(text, str):
@@ -626,10 +675,6 @@ def setup_configuration(
         processing_config = ProcessingConfiguration(
             header_processing_strategy=empty_header,
             footer_processing_strategy=empty_footer,
-            # detail_row_processing_strategy=ft.partial(
-            #     process_detail_row_and_process_account,
-            #     process_func=replace_whitespace,
-            # ),
             detail_row_processing_strategy=ft.partial(
                 process_detail_row_and_process_account_debit_credit,
                 process_account_func=replace_whitespace,
@@ -658,9 +703,18 @@ def setup_configuration(
             ],
         )
 
+        output_file_extension = os.path.splitext(output_path)[-1].lower()
+        export_function: Callable[[Table, OutputDocumentFormat], None]
+        if output_file_extension == ".xlsx":
+            export_function = export_to_excel
+        elif output_file_extension == ".csv":
+            export_function = export_to_csv
+        else:
+            export_function = export_to_excel
+
         # Export configuration
         export_config = ExportConfig(
-            export_strategy=export_to_excel,
+            export_strategy=export_function,
             output_document_format=output_document_format,
         )
 
