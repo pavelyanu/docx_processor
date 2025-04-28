@@ -414,36 +414,17 @@ def parse_transaction_description(
 
         # Try to find ID and split fields accordingly
         id_found = False
-        counterparty_name = ""
-        counterparty_id = ""
-        description = ""
-        i = 0
-
-        while i < len(text):
-            if config.id_test_func(text[i]):
+        for i, word in enumerate(text):
+            word = word.strip()
+            if config.id_test_func(word):
+                result[0] = " ".join(text[:i]).strip()  # Counterparty
+                result[1] = word  # ID
+                result[2] = " ".join(text[i + 1 :]).strip()  # Description
                 id_found = True
                 break
-            else:
-                counterparty_name += text[i] + " "
-                i += 1
-        counterparty_name = counterparty_name.strip()
 
         if not id_found:
             raise TableProcessingError("ID not found in transaction description")
-
-        while i < len(text) and config.id_test_func(text[i]):
-            counterparty_id += text[i]
-            i += 1
-        counterparty_id = counterparty_id.strip()
-
-        while i < len(text):
-            description += text[i] + " "
-            i += 1
-        description = description.strip()
-
-        result[0] = counterparty_name
-        result[1] = counterparty_id
-        result[2] = description
 
         return result
     except Exception as e:
@@ -628,6 +609,10 @@ def convert_to_float(text: Cell) -> Cell:
         raise ValueError(f"Cannot convert '{text}' to float")
 
 
+def test_transaction_id(word: str) -> bool:
+    return word.isdigit() and len(word) == 9
+
+
 def setup_configuration(
     input_path: str, output_path: str
 ) -> Tuple[LoadingConfig, ProcessingConfiguration, ExportConfig]:
@@ -648,7 +633,7 @@ def setup_configuration(
         # Transaction row parsing configuration
         transaction_row_parsing_config = TransactionRowParsingConfig(
             field_count=3,
-            id_test_func=lambda s: s.isdigit(),  # type: ignore
+            id_test_func=test_transaction_id,
         )
 
         # Table format
