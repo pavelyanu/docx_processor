@@ -8,7 +8,7 @@ import os
 
 
 # Basic type definitions
-Cell = str
+Cell = str | float
 Row = List[Cell]
 Table = List[Row]
 Document = List[Table]
@@ -58,6 +58,12 @@ class TableFormat(BaseModel):
     footer_len: int = Field(..., ge=0, description="Number of footer rows to skip")
     account_cell_index: int = Field(
         ..., ge=0, description="Index of account cell in detail row"
+    )
+    debit_cell_index: int = Field(
+        ..., ge=0, description="Index of debit cell in detail row"
+    )
+    credit_cell_index: int = Field(
+        ..., ge=0, description="Index of credit cell in detail row"
     )
     transaction_row_parsing_config: TransactionRowParsingConfig
 
@@ -276,7 +282,7 @@ def validate_row_index(row: Row, index: int, function_name: str) -> None:
 def process_detail_row_and_process_account(
     row: Row,
     table_format: TableFormat,
-    process_func: Callable[[str], str],
+    process_func: Callable[[Cell], Cell],
 ) -> Row:
     """
     Process a detail row by applying a function to the account cell.
@@ -312,6 +318,66 @@ def process_detail_row_and_process_account(
         raise TableProcessingError(f"Error processing detail row: {str(e)}")
 
 
+def process_detail_row_and_process_account_debit_credit(
+    row: Row,
+    table_format: TableFormat,
+    process_account_func: Callable[[Cell], Cell],
+    process_debit_func: Callable[[Cell], Cell],
+    process_credit_func: Callable[[Cell], Cell],
+) -> Row:
+    """
+    Process a detail row by applying functions to the account, debit, and credit cells.
+
+    Args:
+        row: The detail row
+        table_format: Table format configuration
+        process_account_func: Function to apply to the account cell
+        process_debit_func: Function to apply to the debit cell
+        process_credit_func: Function to apply to the credit cell
+
+    Returns:
+        Processed row
+
+    Raises:
+        TableProcessingError: If row processing fails
+    """
+    try:
+        # Make a copy to avoid modifying the original
+        row_copy = row.copy()
+
+        validate_row_index(
+            row_copy,
+            table_format.account_cell_index,
+            "process_detail_row_and_process_account_debit_credit",
+        )
+        validate_row_index(
+            row_copy,
+            table_format.debit_cell_index,
+            "process_detail_row_and_process_account_debit_credit",
+        )
+        validate_row_index(
+            row_copy,
+            table_format.credit_cell_index,
+            "process_detail_row_and_process_account_debit_credit",
+        )
+
+        row_copy[table_format.account_cell_index] = process_account_func(
+            row_copy[table_format.account_cell_index]
+        )
+        row_copy[table_format.debit_cell_index] = process_debit_func(
+            row_copy[table_format.debit_cell_index]
+        )
+        row_copy[table_format.credit_cell_index] = process_credit_func(
+            row_copy[table_format.credit_cell_index]
+        )
+
+        return row_copy
+    except TableProcessingError:
+        raise
+    except Exception as e:
+        raise TableProcessingError(f"Error processing detail row: {str(e)}")
+
+
 def parse_transaction_description(
     row: Row,
     table_format: TableFormat,
@@ -338,8 +404,13 @@ def parse_transaction_description(
         if len(row) == 0 or not row[0]:
             return [""] * config.field_count
 
+        if not isinstance(row[0], str):
+            raise TableProcessingError(
+                f"Expected string in row[0], got {type(row[0]).__name__}"
+            )
+
         text = row[0].split(" ")
-        result = [""] * config.field_count
+        result: Row = [""] * config.field_count
 
         # Try to find ID and split fields accordingly
         id_found = False
@@ -488,9 +559,24 @@ def export_to_excel(table: Table, output_document_format: OutputDocumentFormat) 
         raise ExportError(f"Failed to export to Excel: {str(e)}")
 
 
-def replace_whitespace(text: str) -> str:
+def replace_whitespace(text: Cell) -> Cell:
     """Replace whitespace in text."""
+    if not isinstance(text, str):
+        raise ValueError(f"Expected string, got {type(text).__name__}")
     return text.replace(" ", "")
+
+
+def convert_to_float(text: Cell) -> Cell:
+    """Convert text to float."""
+    try:
+        if not isinstance(text, str):
+            raise ValueError(f"Expected string, got {type(text).__name__}")
+        if not text:
+            return 0.0
+        text = text.replace(" ", "").replace(",", ".")
+        return float(text)
+    except ValueError:
+        raise ValueError(f"Cannot convert '{text}' to float")
 
 
 def setup_configuration(
@@ -521,6 +607,8 @@ def setup_configuration(
             header_len=3,
             footer_len=2,
             account_cell_index=4,
+            debit_cell_index=5,
+            credit_cell_index=6,
             transaction_row_parsing_config=transaction_row_parsing_config,
         )
 
@@ -538,9 +626,15 @@ def setup_configuration(
         processing_config = ProcessingConfiguration(
             header_processing_strategy=empty_header,
             footer_processing_strategy=empty_footer,
+            # detail_row_processing_strategy=ft.partial(
+            #     process_detail_row_and_process_account,
+            #     process_func=replace_whitespace,
+            # ),
             detail_row_processing_strategy=ft.partial(
-                process_detail_row_and_process_account,
-                process_func=replace_whitespace,
+                process_detail_row_and_process_account_debit_credit,
+                process_account_func=replace_whitespace,
+                process_debit_func=convert_to_float,
+                process_credit_func=convert_to_float,
             ),
             transaction_row_processing_strategy=parse_transaction_description,
             combine_rows_strategy=combine_rows,

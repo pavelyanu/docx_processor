@@ -1,5 +1,5 @@
 [project]
-name = "bank-transactions"
+name = "docx_processor"
 version = "0.1.0"
 description = ""
 authors = [
