@@ -4,7 +4,7 @@ from tkinter import filedialog, scrolledtext, ttk, messagebox
 import sys
 import os
 import threading
-from processor import main as process_document
+from docx_processor.processor import main as process_document
 
 
 class TextRedirector:

@@ -1,4 +1,4 @@
-import gui as gui
+import docx_processor.gui as gui
 
 
 def main():
