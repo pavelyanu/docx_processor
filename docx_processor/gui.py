@@ -1,329 +1,226 @@
-# gui.py
+# docx_processor/gui.py
 import tkinter as tk
-from tkinter import filedialog, ttk, messagebox
+from tkinter import filedialog, scrolledtext, ttk, messagebox
+import sys
 import os
 import threading
-import sys
-
-import docx_processor.processor as processor
+from processor import main as process_document
 
 
-class DocxProcessorGUI:
-    # Default values for configuration
-    DEFAULT_TABLE_INDEX = 3  # Will display as 3 but use as 2 (0-based)
-    DEFAULT_HEADER_LEN = 3
-    DEFAULT_FOOTER_LEN = 2
-    DEFAULT_ACCOUNT_INDEX = 4
+class TextRedirector:
+    """Redirects stdout to a text widget."""
 
-    def __init__(self, root):
+    def __init__(self, text_widget: scrolledtext.ScrolledText):
+        self.text_widget = text_widget
+        self.buffer = ""
+
+    def write(self, string: str):
+        self.buffer += string
+        self.text_widget.config(state=tk.NORMAL)
+        self.text_widget.insert(tk.END, string)
+        self.text_widget.see(tk.END)
+        self.text_widget.config(state=tk.DISABLED)
+
+    def flush(self):
+        pass
+
+
+class DocxProcessorApp:
+    def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("DOCX Transaction Processor")
-        self.root.geometry("700x500")
-        self.setup_ui()
+        self.root.title("DOCX Processor")
+        self.root.geometry("800x600")
+        self.root.minsize(600, 400)
 
-    def setup_ui(self):
-        # Main frame with padding
-        main_frame = ttk.Frame(self.root, padding=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        self.input_file_path = tk.StringVar()
+        self.output_file_path = tk.StringVar()
+        self.status_text = tk.StringVar(value="Ready")
 
-        # File selection section
-        file_frame = ttk.LabelFrame(main_frame, text="File Selection", padding=10)
-        file_frame.pack(fill=tk.X, pady=5)
+        self._create_widgets()
+        self._setup_layout()
 
-        # Input file
-        ttk.Label(file_frame, text="Input DOCX file:").grid(
-            row=0, column=0, sticky=tk.W, pady=5
-        )
-        self.input_path = tk.StringVar()
-        ttk.Entry(file_frame, textvariable=self.input_path, width=50).grid(
-            row=0, column=1, padx=5
-        )
-        ttk.Button(file_frame, text="Browse...", command=self.browse_input).grid(
-            row=0, column=2
-        )
+    def _create_widgets(self):
+        # Frame for file selection
+        self.file_frame = ttk.LabelFrame(self.root, text="File Selection")
 
-        # Output file
-        ttk.Label(file_frame, text="Output Excel file:").grid(
-            row=1, column=0, sticky=tk.W, pady=5
+        # Input file selection
+        ttk.Label(self.file_frame, text="Input DOCX File:").grid(
+            row=0, column=0, sticky=tk.W, padx=5, pady=5
         )
-        self.output_path = tk.StringVar()
-        ttk.Entry(file_frame, textvariable=self.output_path, width=50).grid(
-            row=1, column=1, padx=5
+        ttk.Entry(self.file_frame, textvariable=self.input_file_path, width=50).grid(
+            row=0, column=1, padx=5, pady=5
         )
-        ttk.Button(file_frame, text="Browse...", command=self.browse_output).grid(
-            row=1, column=2
-        )
-
-        # Configuration section
-        config_frame = ttk.LabelFrame(main_frame, text="Configuration", padding=10)
-        config_frame.pack(fill=tk.X, pady=5)
-
-        # Table index (1-based in UI)
-        ttk.Label(config_frame, text="Table index:").grid(
-            row=0, column=0, sticky=tk.W, pady=5
-        )
-        self.table_index = tk.IntVar(value=self.DEFAULT_TABLE_INDEX)
-        ttk.Spinbox(
-            config_frame, from_=1, to=10, textvariable=self.table_index, width=5
-        ).grid(row=0, column=1, sticky=tk.W)
-
-        # Header length
-        ttk.Label(config_frame, text="Header length:").grid(
-            row=0, column=2, sticky=tk.W, pady=5, padx=(20, 0)
-        )
-        self.header_len = tk.IntVar(value=self.DEFAULT_HEADER_LEN)
-        ttk.Spinbox(
-            config_frame, from_=0, to=10, textvariable=self.header_len, width=5
-        ).grid(row=0, column=3, sticky=tk.W)
-
-        # Footer length
-        ttk.Label(config_frame, text="Footer length:").grid(
-            row=1, column=0, sticky=tk.W, pady=5
-        )
-        self.footer_len = tk.IntVar(value=self.DEFAULT_FOOTER_LEN)
-        ttk.Spinbox(
-            config_frame, from_=0, to=10, textvariable=self.footer_len, width=5
-        ).grid(row=1, column=1, sticky=tk.W)
-
-        # Account cell index
-        ttk.Label(config_frame, text="Account cell index:").grid(
-            row=1, column=2, sticky=tk.W, pady=5, padx=(20, 0)
-        )
-        self.account_index = tk.IntVar(value=self.DEFAULT_ACCOUNT_INDEX)
-        ttk.Spinbox(
-            config_frame, from_=0, to=10, textvariable=self.account_index, width=5
-        ).grid(row=1, column=3, sticky=tk.W)
-
-        # Restore defaults button
         ttk.Button(
-            config_frame, text="Restore Defaults", command=self.restore_defaults
-        ).grid(row=2, column=0, columnspan=4, pady=10)
+            self.file_frame, text="Browse...", command=self._browse_input_file
+        ).grid(row=0, column=2, padx=5, pady=5)
+
+        # Output file selection
+        ttk.Label(self.file_frame, text="Output File:").grid(
+            row=1, column=0, sticky=tk.W, padx=5, pady=5
+        )
+        ttk.Entry(self.file_frame, textvariable=self.output_file_path, width=50).grid(
+            row=1, column=1, padx=5, pady=5
+        )
+        ttk.Button(
+            self.file_frame, text="Browse...", command=self._browse_output_file
+        ).grid(row=1, column=2, padx=5, pady=5)
+
+        # Button frame
+        button_frame = ttk.Frame(self.root)
 
         # Process button
-        self.process_btn = ttk.Button(
-            main_frame, text="Process Document", command=self.process_document
+        self.process_button = ttk.Button(
+            button_frame, text="Process Document", command=self._process_document
         )
-        self.process_btn.pack(pady=10)
+        self.process_button.pack(side=tk.LEFT, padx=5)
 
-        # Status log
-        log_frame = ttk.LabelFrame(main_frame, text="Processing Log", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        # Clear log button
+        self.clear_log_button = ttk.Button(
+            button_frame, text="Clear Log", command=self._clear_log
+        )
+        self.clear_log_button.pack(side=tk.LEFT, padx=5)
 
-        # Scrollable text area for log
-        self.log_text = tk.Text(log_frame, wrap=tk.WORD, height=10)
-        scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=scrollbar.set)
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Make text widget read-only
+        # Log area
+        log_frame = ttk.LabelFrame(self.root, text="Log")
+        self.log_text = scrolledtext.ScrolledText(
+            log_frame, wrap=tk.WORD, width=80, height=20
+        )
+        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.log_text.config(state=tk.DISABLED)
 
-    def restore_defaults(self):
-        """Reset all configuration fields to default values"""
-        self.table_index.set(self.DEFAULT_TABLE_INDEX)
-        self.header_len.set(self.DEFAULT_HEADER_LEN)
-        self.footer_len.set(self.DEFAULT_FOOTER_LEN)
-        self.account_index.set(self.DEFAULT_ACCOUNT_INDEX)
-        self.log("Default configuration restored")
+        # Status bar
+        status_bar = ttk.Frame(self.root)
+        ttk.Label(status_bar, textvariable=self.status_text).pack(side=tk.LEFT, padx=5)
+        self.progress_bar = ttk.Progressbar(
+            status_bar, mode="indeterminate", length=100
+        )
+        self.progress_bar.pack(side=tk.RIGHT, padx=5)
 
-    def browse_input(self):
-        filename = filedialog.askopenfilename(
-            title="Select DOCX file",
+        # Store frames for layout
+        self.button_frame = button_frame
+        self.log_frame = log_frame
+        self.status_bar = status_bar
+
+    def _setup_layout(self):
+        # Configure the grid layout
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(2, weight=1)
+
+        # Place the widgets
+        self.file_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        self.button_frame.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        self.log_frame.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
+        self.status_bar.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
+
+    def _browse_input_file(self):
+        file_path = filedialog.askopenfilename(
+            title="Select DOCX File",
             filetypes=[("Word Documents", "*.docx"), ("All Files", "*.*")],
         )
-        if filename:
-            self.input_path.set(filename)
-            # Auto-suggest output filename
-            output_name = os.path.splitext(filename)[0] + "_processed.xlsx"
-            self.output_path.set(output_name)
+        if file_path:
+            self.input_file_path.set(file_path)
+            # Set default output path
+            if not self.output_file_path.get():
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                output_path = os.path.join(
+                    os.path.dirname(file_path), f"{base_name}_processed.xlsx"
+                )
+                self.output_file_path.set(output_path)
 
-    def browse_output(self):
-        filename = filedialog.asksaveasfilename(
-            title="Save Excel file",
+    def _browse_output_file(self):
+        file_path = filedialog.asksaveasfilename(
+            title="Save Output File",
             defaultextension=".xlsx",
-            filetypes=[("Excel Files", "*.xlsx"), ("CSV Files", "*.csv")],
+            filetypes=[
+                ("Excel Files", "*.xlsx"),
+                ("CSV Files", "*.csv"),
+                ("All Files", "*.*"),
+            ],
         )
-        if filename:
-            self.output_path.set(filename)
+        if file_path:
+            self.output_file_path.set(file_path)
 
-    def log(self, message):
-        """Add message to log text widget"""
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, message + "\n")
-        self.log_text.see(tk.END)  # Scroll to end
-        self.log_text.config(state=tk.DISABLED)
-        # Force update to show message immediately
-        self.root.update_idletasks()
-
-    def process_document(self):
-        """Process the document in a separate thread"""
-        # Get values from UI
-        input_path = self.input_path.get()
-        output_path = self.output_path.get()
-
-        # Validate inputs
-        if not input_path or not os.path.exists(input_path):
-            messagebox.showerror("Error", "Please select a valid input DOCX file")
-            return
-
-        if not output_path:
-            messagebox.showerror("Error", "Please specify an output Excel file")
-            return
-
-        # Clear log
+    def _clear_log(self):
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete(1.0, tk.END)
         self.log_text.config(state=tk.DISABLED)
 
-        # Disable process button
-        self.process_btn.config(state=tk.DISABLED)
+    def _process_document(self):
+        input_path = self.input_file_path.get()
+        output_path = self.output_file_path.get()
 
-        # Override print to capture output in our log
-        original_print = print
+        if not input_path or not output_path:
+            messagebox.showerror("Error", "Please select both input and output files.")
+            return
 
-        def custom_print(message):
-            original_print(message)  # Still print to console
-            self.root.after(0, lambda: self.log(str(message)))  # Log to UI
+        # Validate file extensions
+        if not input_path.lower().endswith(".docx"):
+            messagebox.showerror("Error", "Input file must be a .docx file.")
+            return
 
-        # Start processing in a thread
-        def process_thread():
-            try:
-                # Replace print function to capture output
-                processor.print = custom_print
+        if not output_path.lower().endswith((".xlsx", ".csv")):
+            messagebox.showerror("Error", "Output file must be an .xlsx or .csv file.")
+            return
 
-                # Get configuration from UI (convert table index from 1-based to 0-based)
-                table_index = self.table_index.get() - 1  # Convert to 0-based
-                header_len = self.header_len.get()
-                footer_len = self.footer_len.get()
-                account_index = self.account_index.get()
+        # Disable UI elements during processing
+        self.process_button.config(state=tk.DISABLED)
+        self.status_text.set("Processing...")
+        self.progress_bar.start(10)
 
-                # Log with user-friendly 1-based index
-                self.log(
-                    f"Starting processing with: Table={self.table_index.get()} (index {table_index}), Header={header_len}, Footer={footer_len}, Account Index={account_index}"
-                )
+        # Clear the log
+        self._clear_log()
 
-                # Set up transaction row parsing config
-                transaction_row_parsing_config = processor.TransactionRowParsingConfig(
-                    field_count=3,
-                    id_test_func=lambda s: s.isdigit(),
-                )
+        # Run processing in a separate thread to keep the UI responsive
+        threading.Thread(
+            target=self._run_processing, args=(input_path, output_path), daemon=True
+        ).start()
 
-                # Create table format with our settings
-                table_format = processor.TableFormat(
-                    header_len=header_len,
-                    footer_len=footer_len,
-                    account_cell_index=account_index,
-                    transaction_row_parsing_config=transaction_row_parsing_config,
-                )
+    def _run_processing(self, input_path, output_path):
+        # Redirect stdout to the log text widget
+        original_stdout = sys.stdout
+        sys.stdout = TextRedirector(self.log_text)
 
-                # Create document format with our settings
-                document_format = processor.InputDocumentFormat(
-                    path=input_path,
-                    table_index=table_index,  # Using 0-based index
-                )
+        try:
+            # Process the document
+            result = process_document(input_path, output_path)
 
-                # Set up configurations
-                loading_config, processing_config, export_config = (
-                    processor.setup_configuration(input_path, output_path)
-                )
+            if result == 0:
+                final_status = "Document processed successfully!"
+                self.root.after(0, lambda: messagebox.showinfo("Success", final_status))
+            else:
+                final_status = f"Document processing failed with code: {result}"
+                self.root.after(0, lambda: messagebox.showerror("Error", final_status))
 
-                # Override with our custom settings
-                loading_config.document_format = document_format
-                processing_config.table_format = table_format
+            self._log(f"\n{final_status}")
 
-                # Process the document - adapted version of main()
-                try:
-                    # Load the document
-                    custom_print(
-                        f"Loading document: {loading_config.document_format.path}"
-                    )
-                    document = loading_config.loading_strategy(
-                        loading_config.document_format
-                    )
+        except Exception as e:
+            error_message = f"Error during processing: {str(e)}"
+            self._log(f"\n{error_message}")
+            self.root.after(0, lambda: messagebox.showerror("Error", error_message))
+        finally:
+            # Restore stdout
+            sys.stdout = original_stdout
 
-                    # Choose the table
-                    custom_print(
-                        f"Selecting table {self.table_index.get()} (index {loading_config.document_format.table_index})"
-                    )
-                    table = loading_config.table_choose_strategy(
-                        document, loading_config.document_format
-                    )
+            # Re-enable UI elements
+            self.root.after(0, lambda: self._reset_ui())
 
-                    # Process the table
-                    custom_print("Processing transactions...")
-                    transactions = processor.extract_transactions(
-                        processing_config, table
-                    )
+    def _reset_ui(self):
+        self.process_button.config(state=tk.NORMAL)
+        self.status_text.set("Ready")
+        self.progress_bar.stop()
 
-                    # Export the result
-                    custom_print(
-                        f"Exporting to {export_config.output_document_format.path}"
-                    )
-                    export_config.export_strategy(
-                        transactions, export_config.output_document_format
-                    )
-
-                    custom_print(
-                        f"✓ Successfully processed document and exported to {export_config.output_document_format.path}"
-                    )
-                    result = 0
-
-                except processor.DocumentLoadingError as e:
-                    custom_print(f"❌ Document loading error: {str(e)}")
-                    result = 1
-                except processor.TableProcessingError as e:
-                    custom_print(f"❌ Table processing error: {str(e)}")
-                    result = 1
-                except processor.ExportError as e:
-                    custom_print(f"❌ Export error: {str(e)}")
-                    result = 1
-                except Exception as e:
-                    custom_print(f"❌ Unexpected error: {str(e)}")
-                    result = 1
-
-                # Restore original print
-                processor.print = original_print
-
-                # Show result
-                if result == 0:
-                    self.root.after(
-                        0,
-                        lambda: messagebox.showinfo(
-                            "Success",
-                            f"Document processed successfully!\nOutput saved to: {output_path}",
-                        ),
-                    )
-                else:
-                    self.root.after(
-                        0,
-                        lambda: messagebox.showerror(
-                            "Error", "Processing failed. See log for details."
-                        ),
-                    )
-
-            except Exception as e:
-                # Restore original print
-                processor.print = original_print
-
-                # Log error and show message box
-                error_message = f"Error: {str(e)}"
-                self.root.after(0, lambda: self.log(error_message))
-                self.root.after(0, lambda: messagebox.showerror("Error", error_message))
-
-            finally:
-                # Re-enable process button
-                self.root.after(0, lambda: self.process_btn.config(state=tk.NORMAL))
-
-        # Start thread
-        threading.Thread(target=process_thread, daemon=True).start()
+    def _log(self, message: str):
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.insert(tk.END, message + "\n")
+        self.log_text.see(tk.END)
+        self.log_text.config(state=tk.DISABLED)
 
 
-def main():
+def run():
     root = tk.Tk()
-    app = DocxProcessorGUI(root)
+    app = DocxProcessorApp(root)
     root.mainloop()
 
 
 if __name__ == "__main__":
-    main()
+    run()

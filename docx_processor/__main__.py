@@ -1,8 +1,8 @@
-import docx_processor.gui as gui
+import gui as gui
 
 
 def main():
-    gui.main()
+    gui.run()
 
 
 if __name__ == "__main__":

@@ -380,6 +380,8 @@ def combine_rows(
     try:
         if not detail_row:
             raise TableProcessingError("Detail row is empty")
+        if not transaction_row:
+            raise TableProcessingError("Transaction row is empty")
         return detail_row + transaction_row
     except TableProcessingError:
         raise
